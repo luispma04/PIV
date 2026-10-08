@@ -15,7 +15,7 @@ pip install -r requirements.txt
 Due to the size of the model weights and datasets, they are not included in this repository. You must set them up manually before running the tracking algorithms.
 
 ### 1. Download the Dataset
-You can download the rally video datasets and their associated data from this [Google Drive folder](https://drive.google.com/drive/folders/1_FGsEY-lHNNxEBOCPWyPXaoLSU2AD__X?usp=drive_link). Once downloaded, place the rallies in your desired local directory (e.g., `datasets/rally_04/`, etc.).
+You can download the rally video datasets and their associated data from this [Google Drive folder](https://drive.google.com/drive/folders/1_FGsEY-lHNNxEBOCPWyPXaoLSU2AD__X?usp=sharing). Once downloaded, place the rallies in your desired local directory (e.g., `datasets/rally_04/`, etc.).
 
 ### 2. Download and Setup TennisCourtDetector
 This project relies on the [TennisCourtDetector](https://github.com/yastrebksv/TennisCourtDetector) to extract the initial reference court keypoints (`court_base_<name>.mat`) from the first frame of the rally.
