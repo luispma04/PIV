@@ -18,11 +18,11 @@ Due to the size of the model weights and datasets, they are not included in this
 You need the rally video datasets to evaluate the pipeline. Place them in your desired directory (e.g., `datasets/rally_04/`, etc.).
 
 ### 2. Download and Setup TennisCourtDetector
-This project relies on the [TennisCourtDetector](https://github.com/georgesung/tennis_court_det_fastai) to extract the initial reference court keypoints (`court_base_<name>.mat`) from the first frame of the rally.
+This project relies on the [TennisCourtDetector](https://github.com/yastrebksv/TennisCourtDetector) to extract the initial reference court keypoints (`court_base_<name>.mat`) from the first frame of the rally.
 
 1. Clone the `TennisCourtDetector` repository inside this project directory (or elsewhere):
    ```bash
-   git clone https://github.com/georgesung/tennis_court_det_fastai.git TennisCourtDetector
+   git clone https://github.com/yastrebksv/TennisCourtDetector.git TennisCourtDetector
    ```
 2. Download the pre-trained PyTorch weights as specified in their repository and place them in the correct folder (e.g., `TennisCourtDetector/models/`).
 3. Follow their installation instructions (installing `fastai`, `torch`, etc.).
