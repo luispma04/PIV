@@ -73,6 +73,10 @@ def main():
     path_feature_dir = sys.argv[3]
     path_output_dir = sys.argv[4]
 
+    # Ensure output folders exist
+    os.makedirs(path_feature_dir, exist_ok=True)
+    os.makedirs(path_output_dir, exist_ok=True)
+
     # Process reference image templateimg.jpg if it exists
     template_img_path = os.path.join(path_to_refdir, "templateimg.jpg")
     if os.path.exists(template_img_path):

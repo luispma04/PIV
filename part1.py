@@ -397,7 +397,7 @@ def match_sift_features(pts1, des1, pts2, des2, ratio_thresh=0.75, mutual_check=
         
     # Build KD-Tree on target descriptors
     tree2 = cKDTree(des2)
-    dists, indices = tree2.query(des1, k=2)
+    dists, indices = tree2.query(des1, k=2, workers=-1)
     
     # Lowe's ratio test
     ratio_mask = dists[:, 0] < (ratio_thresh * dists[:, 1])
@@ -409,7 +409,7 @@ def match_sift_features(pts1, des1, pts2, des2, ratio_thresh=0.75, mutual_check=
         
     # Mutual cross-check: query 1-NN of des2 in des1
     tree1 = cKDTree(des1)
-    _, rev_indices = tree1.query(des2, k=1)
+    _, rev_indices = tree1.query(des2, k=1, workers=-1)
     
     valid_idx1 = []
     valid_idx2 = []
@@ -431,47 +431,69 @@ def match_sift_features(pts1, des1, pts2, des2, ratio_thresh=0.75, mutual_check=
 
 def load_or_compute_court_anchor(refdir):
     """
-    Loads court model anchoring to compute H_ref_to_court.
+    Loads court model anchoring to compute H_ref_to_court (Frame 0 pixels -> court meters).
     
-    Checks for:
-    1. `anchor.mat` or `template_landmarks.mat` in refdir containing:
-       - 'H_ref_to_court': direct (3, 3) matrix mapping reference pixels to court meters.
-       OR
-       - 'img_pts' and 'court_pts': corresponding landmark pairs.
-       OR
-       - 'img_pts' and 'landmark_names' matching landmarks in `courtmodel.mat`.
-    2. If no anchor file is found, defaults to identity with a notice.
+    1. Loads metric court model from `courtmodel.mat` in refdir (contains 'pts' in meters).
+    2. Matches with image keypoints from `court_base_*.mat` or `court_keypoints.mat` in refdir.
+    3. Solves H_ref_to_court using Hartley-normalized DLT from scratch.
     """
-    anchor_candidates = [
-        os.path.join(refdir, "anchor.mat"),
-        os.path.join(refdir, "court_anchor.mat"),
-        os.path.join(refdir, "template_landmarks.mat"),
-        os.path.join(refdir, "courtmodel.mat")
-    ]
-    
-    for cand in anchor_candidates:
+    court_model_path = os.path.join(refdir, "courtmodel.mat")
+    court_pts = None
+    H_precomputed = None
+
+    if os.path.exists(court_model_path):
+        try:
+            cm = sio.loadmat(court_model_path)
+            if "pts" in cm:
+                court_pts = cm["pts"].astype(np.float64)
+            if "H_ref_to_court" in cm:
+                H_precomputed = cm["H_ref_to_court"].astype(np.float64)
+        except Exception as e:
+            print(f"[part1] Notice reading courtmodel.mat: {e}")
+
+    if H_precomputed is not None and is_homography_valid(H_precomputed):
+        print("[part1] Loaded precomputed anchor H_ref_to_court from courtmodel.mat.")
+        return H_precomputed
+
+    # Search for image keypoints file: court_base_*.mat, court_keypoints.mat, anchor.mat
+    kps_candidates = glob.glob(os.path.join(refdir, "court_base_*.mat"))
+    kps_candidates.extend([
+        os.path.join(refdir, "court_keypoints.mat"),
+        os.path.join(refdir, "anchor.mat")
+    ])
+
+    for cand in kps_candidates:
         if not os.path.exists(cand):
             continue
         try:
             data = sio.loadmat(cand)
             if "H_ref_to_court" in data:
-                H_ref_to_court = data["H_ref_to_court"].astype(np.float64)
-                if is_homography_valid(H_ref_to_court):
-                    print(f"[part1] Loaded precomputed anchor H_ref_to_court from {os.path.basename(cand)}.")
-                    return H_ref_to_court
-                    
-            if "img_pts" in data and "court_pts" in data:
+                H_anc = data["H_ref_to_court"].astype(np.float64)
+                if is_homography_valid(H_anc):
+                    print(f"[part1] Loaded H_ref_to_court from {os.path.basename(cand)}.")
+                    return H_anc
+
+            img_pts = None
+            if "img_pts" in data:
                 img_pts = data["img_pts"].astype(np.float64)
-                court_pts = data["court_pts"].astype(np.float64)
-                H_anc, _ = ransac_homography(img_pts, court_pts, threshold=0.1)
-                if H_anc is not None:
-                    print(f"[part1] Computed H_ref_to_court from landmark correspondences in {os.path.basename(cand)}.")
+            elif "points" in data:
+                img_pts = data["points"].astype(np.float64)
+
+            # If candidate also provides court_pts, use them; otherwise use courtmodel.mat pts
+            target_court_pts = data["court_pts"].astype(np.float64) if "court_pts" in data else court_pts
+
+            if img_pts is not None and target_court_pts is not None and len(img_pts) == len(target_court_pts):
+                H_anc = dlt_homography(img_pts, target_court_pts)
+                if H_anc is not None and is_homography_valid(H_anc):
+                    if abs(H_anc[2, 2]) > 1e-10:
+                        H_anc /= H_anc[2, 2]
+                    print(f"[part1] Computed H_ref_to_court from {os.path.basename(cand)} and courtmodel.mat via DLT.")
                     return H_anc
         except Exception as e:
             print(f"[part1] Notice reading {cand}: {e}")
-            
-    print("[part1] Warning: No explicit landmark anchor file found in refdir.")
-    print("        Using identity matrix for H_ref_to_court until anchor is defined.")
+
+    print("[part1] Warning: No court landmark correspondences found in refdir.")
+    print("        Using identity matrix for H_ref_to_court until anchor is provided.")
     return np.eye(3, dtype=np.float64)
 
 
@@ -510,7 +532,7 @@ def part1(path1, path2, path3, path4):
         ref_pts, ref_des = load_feature_mat(template_feat_path)
         print(f"[part1] Loaded reference template features: {len(ref_pts)} keypoints.")
     else:
-        print("[part1] Warning: templateimg.mat not found. Will use first frame as reference.")
+        print("[part1] Notice: templateimg.mat not found. Will initialize reference from first frame.")
         
     # 3. Discover and sort all sequence frames
     # Pattern: somename_NNNN.ext
@@ -544,6 +566,7 @@ def part1(path1, path2, path3, path4):
     cut_count = 0
     direct_success_count = 0
     seq_success_count = 0
+    court_lost = False
     
     for idx, (frame_num, num_str, name_no_ext, img_path) in enumerate(frame_list):
         # Locate corresponding feature .mat file
@@ -572,25 +595,42 @@ def part1(path1, path2, path3, path4):
             if len(m_curr) >= 12:
                 H_direct, inliers = ransac_homography(m_curr, m_ref, threshold=3.5, min_inliers=10)
                 if H_direct is not None and is_homography_valid(H_direct):
-                    # Check that determinant is positive and condition is healthy
-                    if np.linalg.det(H_direct) > 0.05 and np.linalg.cond(H_direct) < 5e4:
-                        H_curr = H_direct
-                        method = f"direct (inliers: {np.sum(inliers)}/{len(m_curr)})"
-                        direct_success_count += 1
+                    # Check spatial spread: reject static broadcast graphics / scoreboard clusters
+                    inlier_pts = m_curr[inliers]
+                    ref_w = max(float(np.ptp(ref_pts[:, 0])), 100.0)
+                    ref_h = max(float(np.ptp(ref_pts[:, 1])), 100.0)
+                    span_x = float(np.ptp(inlier_pts[:, 0])) / ref_w
+                    span_y = float(np.ptp(inlier_pts[:, 1])) / ref_h
+
+                    if span_x >= 0.30 and span_y >= 0.20 and np.sum(inliers) >= 15:
+                        # Check that determinant is positive and condition is healthy
+                        if np.linalg.det(H_direct) > 0.05 and np.linalg.cond(H_direct) < 5e4:
+                            H_curr = H_direct
+                            method = f"direct (inliers: {np.sum(inliers)}/{len(m_curr)})"
+                            direct_success_count += 1
+                            court_lost = False
                         
         # ----------------------------------------------------------------------
         # Strategy B: Frame-to-frame tracking composition (For camera pan/motion)
+        # Only active when court was visible in previous frame (not during cuts/closeups)
         # ----------------------------------------------------------------------
-        if H_curr is None and curr_des is not None and prev_des is not None and len(curr_des) >= 4:
+        if not court_lost and H_curr is None and curr_des is not None and prev_des is not None and len(curr_des) >= 4:
             m_curr, m_prev = match_sift_features(curr_pts, curr_des, prev_pts, prev_des, ratio_thresh=0.75)
             if len(m_curr) >= 10:
                 H_rel, inliers = ransac_homography(m_curr, m_prev, threshold=3.5, min_inliers=8)
                 if H_rel is not None and is_homography_valid(H_rel):
-                    H_comp = H_prev @ H_rel
-                    if is_homography_valid(H_comp):
-                        H_curr = H_comp / H_comp[2, 2]
-                        method = f"sequential (inliers: {np.sum(inliers)}/{len(m_curr)})"
-                        seq_success_count += 1
+                    inlier_pts = m_curr[inliers]
+                    prev_w = max(float(np.ptp(prev_pts[:, 0])), 100.0)
+                    prev_h = max(float(np.ptp(prev_pts[:, 1])), 100.0)
+                    span_x = float(np.ptp(inlier_pts[:, 0])) / prev_w
+                    span_y = float(np.ptp(inlier_pts[:, 1])) / prev_h
+
+                    if span_x >= 0.30 and span_y >= 0.20:
+                        H_comp = H_prev @ H_rel
+                        if is_homography_valid(H_comp):
+                            H_curr = H_comp / H_comp[2, 2]
+                            method = f"sequential (inliers: {np.sum(inliers)}/{len(m_curr)})"
+                            seq_success_count += 1
                         
         # ----------------------------------------------------------------------
         # Strategy C: Cut / Occlusion / Absent Court Handling
@@ -600,13 +640,14 @@ def part1(path1, path2, path3, path4):
             H_curr = last_valid_H.copy()
             method = "cut/lost fallback (propagated last valid)"
             cut_count += 1
+            court_lost = True
         else:
             last_valid_H = H_curr.copy()
-            
-        # Update tracking state for next frame
-        if curr_pts is not None:
-            prev_pts, prev_des = curr_pts, curr_des
-            H_prev = H_curr.copy()
+            court_lost = False
+            # Only update previous court keypoints when court is confirmed visible
+            if curr_pts is not None:
+                prev_pts, prev_des = curr_pts, curr_des
+                H_prev = H_curr.copy()
             
         # ----------------------------------------------------------------------
         # Compute Metric Court Homography: Hc = H_ref_to_court @ H

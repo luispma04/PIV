@@ -1,11 +1,32 @@
+# Python caches and bytecode
 __pycache__/
 *.py[cod]
 *$py.class
 .pytest_cache/
 .coverage
+
+# Datasets and Media
+datasets/
 data/
+*.mp4
+*.jpg
+*.png
+*.avi
+court_base_*.mat
+
+# Outputs and Intermediate files
 output/
 features/
-*.mp4
-*.avi
-*.mov
+features*/
+results/
+results*/
+results_simplified/
+sanity_reports/
+
+# Dependencies and external repos
+TennisCourtDetector/
+models/
+
+# OS specific
+.DS_Store
+Thumbs.db

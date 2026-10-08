@@ -1,108 +1,55 @@
-# PIV Project 2026 - Part 1: Planar Tracking & Homography Estimation
+# Tennis Court Tracking (PIV Project)
 
-Implementation of **Part 1** of the Computer Vision (PIV - *Processamento de Imagem e Visão*) project at Instituto Superior Técnico (IST).
+This repository contains the implementation for tracking tennis court lines across a video sequence using homography estimation, part of the PIV course project.
 
----
+## Requirements
 
-## 📌 Project Overview (Part 1)
+Ensure you have installed the required dependencies:
 
-The objective is to build a robust homography estimation and tracking pipeline using only RGB data. For every frame $i$, the pipeline calculates two $3 \times 3$ homography matrices:
-1. **$H$**: Maps frame $i$ onto the reference image (`templateimg.jpg`, typically the first frame) for video stabilization and drift-free tracking.
-2. **$H_c$**: Maps frame $i$ onto the synthetic **court model** in metric units (meters) on the court plane ($x_{\text{court}} \sim H_c x_i$).
-
-Outputs are stored as `homography_NNNN.mat` containing `{"H": H, "Hc": Hc}` for every frame in the sequence, including cuts, close-ups, and occluded frames.
-
----
-
-## ⚖️ Strict Library & Architecture Constraints
-
-As required by the assignment specification:
-* **`main1.py`**:
-  * May import `cv2`.
-  * Must import `part1`.
-  * Extracts SIFT features from all frames and saves them in `.mat` format matching `pivist/features`.
-  * Calls `part1.part1(path_to_refdir, path_images_dir, path_feature_dir, path_output_dir)`.
-* **`part1.py`**:
-  * **CANNOT import `cv2`** (strictly enforced).
-  * Uses only `numpy` and `scipy`.
-  * Implements **Hartley-normalized Direct Linear Transformation (DLT)** from scratch.
-  * Implements **RANSAC outlier rejection** from scratch (minimal 4-point sample, collinearity rejection, consensus scoring).
-  * Implements SIFT feature matching via Lowe's ratio test and mutual consistency using `scipy.spatial.cKDTree`.
-  * Implements hybrid tracking (direct template matching + sequential composition + cut/occlusion fallback).
-
----
-
-## 📁 Repository Structure
-
-```
-.
-├── main1.py                  # Part 1 runner: extracts SIFT features and invokes part1()
-├── part1.py                  # Core algorithm: DLT, RANSAC, tracker, court mapping (NO cv2)
-├── court_model.py            # Generates official ITF Tennis Court model (courtmodel.mat)
-├── annotate_anchor.py        # Interactive tool to anchor templateimg.jpg to courtmodel.mat
-├── extract_frames.py         # Utility to extract frame sequences from video (e.g. .mp4/.mov)
-├── visualize_homography.py   # Overlay court wireframe onto frames & evaluate Appendix A metrics
-├── tests/
-│   └── test_part1.py         # Automated unit and integration tests
-├── Projecet_v1.pdf           # Project assignment description
-└── README.md
-```
-
----
-
-## 🚀 How to Run
-
-### 1. Generate Court Model (`courtmodel.mat`)
-Generate the official ITF tennis court geometry in meters:
 ```bash
-python court_model.py --output data/ref/courtmodel.mat
+pip install -r requirements.txt
 ```
 
-### 2. Extract Frames from Video (Optional)
-If starting from a video file:
+## Setup & Data Preparation
+
+Due to the size of the model weights and datasets, they are not included in this repository. You must set them up manually before running the tracking algorithms.
+
+### 1. Download the Dataset
+You need the rally video datasets to evaluate the pipeline. Place them in your desired directory (e.g., `datasets/rally_04/`, etc.).
+
+### 2. Download and Setup TennisCourtDetector
+This project relies on the [TennisCourtDetector](https://github.com/georgesung/tennis_court_det_fastai) to extract the initial reference court keypoints (`court_base_<name>.mat`) from the first frame of the rally.
+
+1. Clone the `TennisCourtDetector` repository inside this project directory (or elsewhere):
+   ```bash
+   git clone https://github.com/georgesung/tennis_court_det_fastai.git TennisCourtDetector
+   ```
+2. Download the pre-trained PyTorch weights as specified in their repository and place them in the correct folder (e.g., `TennisCourtDetector/models/`).
+3. Follow their installation instructions (installing `fastai`, `torch`, etc.).
+
+### 3. Extract Reference Images and Keypoints
+For each rally you want to evaluate, you need to extract the first frame (as `templateimg.jpg`) and compute the initial 14 court keypoints (`court_base_templateimg.mat`).
+
+1. Extract the first frame of the rally and save it. For instance, save it as `templateimg.jpg`.
+2. Run the `TennisCourtDetector` inference on that image to extract the keypoints:
+   ```bash
+   cd TennisCourtDetector
+   python infer_in_image.py --image_path ../templateimg.jpg --use_homography --use_refine_kps
+   ```
+3. This will generate a file named `court_base_templateimg.mat`. 
+4. Place **both** `templateimg.jpg` and `court_base_templateimg.mat` into your reference directory (e.g., `ref_tennis/` or a rally-specific directory). The evaluation scripts will look for `court_base_*.mat` in either the `images_dir` or the `ref_dir`.
+
+> **Note:** The universal physical dimensions of the ITF tennis court are provided in `ref_tennis/courtmodel.mat`. This file is already tracked in the repository and you do not need to generate it.
+
+## Running the Tracking Pipeline
+
+Once the data is prepared, you can run the evaluation script:
+
 ```bash
-python extract_frames.py path/to/video.mov --images_dir data/images --ref_dir data/ref --max_frames 150 --step 1
+python main1.py <path_to_refdir> <path_images_dir> <path_feature_dir> <path_output_dir>
 ```
-This extracts frames named `rally_NNNN.jpg` and writes `templateimg.jpg` into `data/ref/`.
 
-### 3. Anchor Court Model (Interactive)
-Associate landmarks between `templateimg.jpg` and `courtmodel.mat` to calculate the reference court anchor $H_{\text{ref}\to\text{court}}$:
+Example:
 ```bash
-python annotate_anchor.py data/ref
-```
-Click 4+ court corners/Ts on the window, press `c` to save `data/ref/anchor.mat`.
-
-### 4. Run Part 1 Pipeline
-Execute the official project command:
-```bash
-python main1.py path_to_refdir path_images_dir path_feature_dir path_output_dir
-```
-**Example:**
-```bash
-python main1.py data/ref data/images data/features data/output
-```
-This produces:
-- SIFT feature `.mat` files in `data/features/` (`combined` array of shape `(130, N)`).
-- `homography_NNNN.mat` in `data/output/` containing `{"H": H, "Hc": Hc}`.
-
----
-
-## 🔍 Visual Verification & Evaluation (Appendix A)
-
-To overlay the court wireframe on the original frames and measure temporal consistency:
-```bash
-python visualize_homography.py data/ref data/images data/output --save_video overlay.mp4
-```
-
----
-
-## 🧪 Running Tests
-
-Run the test suite verifying Hartley DLT, RANSAC outlier rejection, SIFT matching, and adherence to library constraints:
-```bash
-python tests/test_part1.py
-```
-Or with pytest:
-```bash
-pytest tests/
+python main1.py ref_tennis/ datasets/rally_04/images/ features/rally_04/ results/rally_04/
 ```
